@@ -1,0 +1,70 @@
+name: ios-unsigned
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-ipa:
+    runs-on: macos-15
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Show toolchain
+        run: |
+          xcodebuild -version
+          node -v
+          pod --version
+
+      - name: Install frontend deps
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build mobile web bundle + cap sync
+        working-directory: frontend
+        run: npm run build:mobile
+
+      - name: Pod install
+        working-directory: frontend/ios/App
+        run: pod install
+
+      - name: Archive (unsigned)
+        working-directory: frontend/ios/App
+        run: |
+          xcodebuild \
+            -workspace App.xcworkspace \
+            -scheme App \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$PWD/build/App.xcarchive" \
+            archive \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGN_ENTITLEMENTS="" \
+            DEVELOPMENT_TEAM=""
+
+      - name: Package unsigned .ipa
+        working-directory: frontend/ios/App
+        run: |
+          set -e
+          APP_PATH="build/App.xcarchive/Products/Applications/App.app"
+          rm -rf build/Payload
+          mkdir -p build/Payload
+          cp -R "$APP_PATH" build/Payload/
+          cd build
+          zip -qry openGym-unsigned.ipa Payload
+          ls -lh openGym-unsigned.ipa
+
+      - name: Upload .ipa artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: openGym-unsigned-ipa
+          path: frontend/ios/App/build/openGym-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 14
